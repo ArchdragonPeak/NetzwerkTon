@@ -18,31 +18,36 @@ class Program
       startPos -= startPos % reader.WaveFormat.BlockAlign;
       int endPos = startPos + frameSize * bytesPerMs;
       endPos -= endPos % reader.WaveFormat.BlockAlign;
+      byte[] buffer = new byte[1024 - (1024 % reader.WaveFormat.BlockAlign)];
 
       // network
-      UdpClient server = new();
+      using UdpClient server = new();
       IPAddress ip = IPAddress.Parse("192.168.178.50");
       IPEndPoint endPoint = new(ip, 25567);
 
-      while (endPos <= lastPos)
+      while (endPos < lastPos)
       {
-        using WaveFileWriter writer = new($"data/out/zphr_out{frameCounter}.wav", reader.WaveFormat);
-        reader.Position = startPos;
-        byte[] buffer = new byte[1024 - (1024 % reader.WaveFormat.BlockAlign)];
-        Console.WriteLine($"Buffer size: {buffer.Length}, BlockAlign: {reader.WaveFormat.BlockAlign}, BytesPerMs: {bytesPerMs}, startPos: {startPos}, endPos: {endPos}");
-
-        while (reader.Position < endPos)
         {
-          int bytesRequired = endPos - (int)reader.Position;
-          int bytesToRead = Math.Min(bytesRequired, buffer.Length);
+          using WaveFileWriter writer = new($"data/out/zphr_out{frameCounter}.wav", reader.WaveFormat);
+          reader.Position = startPos;
+          Console.WriteLine(
+            $"startPos: {startPos} " +
+            $"endPos: {endPos} " +
+            $"size: {endPos - startPos}"
+          );
 
-          int bytesRead = reader.Read(buffer, 0, bytesToRead);
-          if (bytesRead == 0)
-            break;
+          while (reader.Position <= endPos)
+          {
+            int bytesRequired = endPos - (int)reader.Position;
+            int bytesToRead = Math.Min(bytesRequired, buffer.Length);
 
-          writer.Write(buffer, 0, bytesRead);
+            int bytesRead = reader.Read(buffer, 0, bytesToRead);
+            if (bytesRead == 0)
+              break;
+
+            writer.Write(buffer, 0, bytesRead);
+          }
         }
-
         // send wav
         byte[] file = File.ReadAllBytes($"data/out/zphr_out{frameCounter}.wav");
         Console.WriteLine($"Sending file {frameCounter}...");
@@ -55,35 +60,6 @@ class Program
         endPos += frameSize * bytesPerMs;
         frameCounter++;
       }
-
-      /*
-      reader.Position = startPos;
-      byte[] buffer = new byte[1024 - (1024 % reader.WaveFormat.BlockAlign)];
-      Console.WriteLine($"Buffer size: {buffer.Length}, BlockAlign: {reader.WaveFormat.BlockAlign}, BytesPerMs: {bytesPerMs}, startPos: {startPos}, endPos: {endPos}");
-
-      while (reader.Position < endPos)
-      {
-        int bytesRequired = endPos - (int)reader.Position;
-        int bytesToRead = Math.Min(bytesRequired, buffer.Length);
-        
-        int bytesRead = reader.Read(buffer, 0, bytesToRead);
-        if (bytesRead == 0)
-          break;
-
-        writer.Write(buffer, 0, bytesRead);
-      }
-    }
-    // send wav
-    byte[] file = File.ReadAllBytes("data/zphr_out.wav");
-    
-    Console.WriteLine("Sending file...");
-    
-    UdpClient server = new();
-    IPAddress ip = IPAddress.Parse("127.0.0.1");
-    IPEndPoint endPoint = new(ip, 25567);
-    int sent = server.Send(file, file.Length, endPoint);
-    Console.WriteLine($"Sent {sent} bytes.");
-    */
     }
   }
   
