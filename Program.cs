@@ -18,15 +18,18 @@ class Program
         $"BlockAlign: {reader.WaveFormat.BlockAlign}" +
         $"Encoding: {reader.WaveFormat.Encoding}"
       );
-      int bytesPerMs = reader.WaveFormat.AverageBytesPerSecond / 1000;
+      
       int frameCounter = 0;
       int startPos = 0;
-      int frameSize = 20; //ms
+      int frameSize = 200; //ms
       int lastPos = (int)reader.Length;
+
+      int bytesPerFrame = reader.WaveFormat.AverageBytesPerSecond * frameSize / 1000;
+      bytesPerFrame -= bytesPerFrame % reader.WaveFormat.BlockAlign;
+
       startPos -= startPos % reader.WaveFormat.BlockAlign;
-      int endPos = startPos + frameSize * bytesPerMs;
-      endPos -= endPos % reader.WaveFormat.BlockAlign;
-      byte[] buffer = new byte[1024 - (1024 % reader.WaveFormat.BlockAlign)];
+      
+      byte[] buffer = new byte[bytesPerFrame];
 
       // network
       using UdpClient server = new();
@@ -35,14 +38,18 @@ class Program
 
       while (startPos < lastPos)
       {
-        {
-          //using WaveFileWriter writer = new($"data/out/zphr_out{frameCounter}.wav", reader.WaveFormat);
+          int endPos = startPos + bytesPerFrame;
+          if (endPos > lastPos)
+            endPos = lastPos;
+          endPos -= endPos % reader.WaveFormat.BlockAlign;
+          
           reader.Position = startPos;
           Console.WriteLine(
             $"startPos: {startPos} " +
             $"endPos: {endPos} " +
             $"size: {endPos - startPos}"
           );
+        {
 
           while (reader.Position < endPos)
           {
@@ -56,10 +63,10 @@ class Program
             int sent = server.Send(buffer, bytesRead, endPoint);
           }
         }
+        Thread.Sleep(5);
 
         // next frame
         startPos = endPos;
-        endPos += frameSize * bytesPerMs;
         frameCounter++;
       }
       byte[] endPacket = System.Text.Encoding.ASCII.GetBytes("ENDE");
