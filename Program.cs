@@ -10,6 +10,14 @@ class Program
     // get wav
     {
       using WaveFileReader reader = new("data/zphr.wav");
+      Console.WriteLine(
+        $"Format: {reader.WaveFormat}" +
+        $"Rate: {reader.WaveFormat.SampleRate}" +
+        $"BitsPerSample: {reader.WaveFormat.BitsPerSample}" +
+        $"Channels: {reader.WaveFormat.Channels}" +
+        $"BlockAlign: {reader.WaveFormat.BlockAlign}" +
+        $"Encoding: {reader.WaveFormat.Encoding}"
+      );
       int bytesPerMs = reader.WaveFormat.AverageBytesPerSecond / 1000;
       int frameCounter = 0;
       int startPos = 0;
@@ -25,10 +33,10 @@ class Program
       IPAddress ip = IPAddress.Parse("192.168.178.50");
       IPEndPoint endPoint = new(ip, 25567);
 
-      while (endPos < lastPos)
+      while (startPos < lastPos)
       {
         {
-          using WaveFileWriter writer = new($"data/out/zphr_out{frameCounter}.wav", reader.WaveFormat);
+          //using WaveFileWriter writer = new($"data/out/zphr_out{frameCounter}.wav", reader.WaveFormat);
           reader.Position = startPos;
           Console.WriteLine(
             $"startPos: {startPos} " +
@@ -36,7 +44,7 @@ class Program
             $"size: {endPos - startPos}"
           );
 
-          while (reader.Position <= endPos)
+          while (reader.Position < endPos)
           {
             int bytesRequired = endPos - (int)reader.Position;
             int bytesToRead = Math.Min(bytesRequired, buffer.Length);
@@ -45,35 +53,38 @@ class Program
             if (bytesRead == 0)
               break;
 
-            writer.Write(buffer, 0, bytesRead);
+            int sent = server.Send(buffer, bytesRead, endPoint);
           }
         }
-        // send wav
-        byte[] file = File.ReadAllBytes($"data/out/zphr_out{frameCounter}.wav");
-        Console.WriteLine($"Sending file {frameCounter}...");
-        int sent = server.Send(file, file.Length, endPoint);
-        Console.WriteLine($"Sent {sent} bytes.");
-
 
         // next frame
         startPos = endPos;
         endPos += frameSize * bytesPerMs;
         frameCounter++;
       }
+      byte[] endPacket = System.Text.Encoding.ASCII.GetBytes("ENDE");
+      server.Send(endPacket, endPacket.Length, endPoint);
     }
   }
   
-  async static void RunClient()
+  static void RunClient()
   {
-    int frameCounter = 0;
     using UdpClient client = new(25567, AddressFamily.InterNetwork);
-    while(true)
+    byte[] endPacket = System.Text.Encoding.ASCII.GetBytes("ENDE");
+    
+    WaveFormat format = new(44100, 24, 2);
+    using WaveFileWriter writer = new($"data/received/received.wav", format);
+    int last = 0;
+    
+    while (true)
     {
       try
       {
         IPEndPoint endPoint = new(IPAddress.Any, 0);
         byte[] received = client.Receive(ref endPoint);
-        File.WriteAllBytes($"data/received/received{frameCounter++}.wav", received);
+        if (received.SequenceEqual(endPacket)) break;
+        writer.Write(received, 0, received.Length);
+        last += received.Length;
         Console.WriteLine("Received file.");
       }
       catch (Exception ex)
