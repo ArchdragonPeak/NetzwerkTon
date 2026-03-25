@@ -32,38 +32,87 @@ using NAudio.Wave;
 
 abstract class AudioPacket
 {
-  byte[] Header { get; }
-  byte[] Data { get; }
+  public byte[] Header { get; protected set; }
+  public byte[] Data { get; protected set;}
 
   public AudioPacket(byte[] header, byte[] data)
   {
     this.Header = header;
     this.Data = data;
   }
+  public abstract byte[] GetHeader();
 }
 
 class StartPacket : AudioPacket
 {
   private StartPacket(byte[] data) : base(new byte[] { 0x01 }, data) { }
-  
+
   public static StartPacket Create()
   {
     return new StartPacket(new byte[0]);
   }
+  public override byte[] GetHeader()
+  {
+    return new byte[] { 0x01 };
+  }
 }
-
 class DataPacket : AudioPacket
 {
-  public DataPacket(byte[] data) : base(new byte[] { 0x02 }, data) { }
+  //                            type           codec          sequence no    body length 
+  public const int HeaderSize = sizeof(byte) + sizeof(byte) + sizeof(uint) + sizeof(uint);
+  
+  public byte Type => Header[0];
+  public byte Codec => Header[1];
+  public uint SequenceNumber => BitConverter.ToUInt32(Header, 2);
+  public uint BodyLength => BitConverter.ToUInt32(Header, 6);
+  
+  private DataPacket(byte[] header, byte[] data) : base(header, data) { }
+
+  public static DataPacket Create(byte codec, uint sequenceNumber, uint bodyLength, byte[] data)
+  {
+    byte[] header = new byte[HeaderSize];
+
+    using MemoryStream ms = new(header);
+    using BinaryWriter w = new(ms);
+
+    w.Write((byte)0x02); // type
+    w.Write(codec);
+    w.Write(sequenceNumber);
+    w.Write(bodyLength);
+
+    return new(header, data);
+  }
+  public static DataPacket Create(byte[] received)
+  {
+    byte[] header = received[..HeaderSize];
+    byte[] data = received[HeaderSize..];
+
+    return new(header, data);
+  }
+
+  public override byte[] GetHeader()
+  {
+    return Header;
+  }
+  public byte[] GetData()
+  {
+    return Data;
+  }
+  
 }
 
 class EndPacket : AudioPacket
 {
   private EndPacket(byte[] data) : base(new byte[] { 0x03 }, data) { }
-  
+
   public static EndPacket Create()
   {
-    return new EndPacket([0]);
+    return new(new byte[0]);
+  }
+  
+  public override byte[] GetHeader()
+  {
+    return new byte[] { 0x03 };
   }
 }
 
@@ -100,7 +149,10 @@ class Program
       using UdpClient server = new();
       IPAddress ip = IPAddress.Parse("192.168.178.50");
       IPEndPoint endPoint = new(ip, 25567);
-
+      
+      StartPacket startPacket = StartPacket.Create();
+      server.Send(startPacket.GetHeader(), startPacket.GetHeader().Length, endPoint);
+      
       while (startPos < lastPos)
       {
           int endPos = startPos + bytesPerFrame;
@@ -124,8 +176,16 @@ class Program
             int bytesRead = reader.Read(buffer, 0, bytesToRead);
             if (bytesRead == 0)
               break;
+            DataPacket dataPacket = DataPacket.Create(
+              0x0,
+              (uint)frameCounter,
+              (uint)bytesRead,
+              buffer[..bytesRead]
+            );
 
-            int sent = server.Send(buffer, bytesRead, endPoint);
+            byte[] data = dataPacket.GetHeader().Concat(dataPacket.GetData()).ToArray();
+            
+            int sent = server.Send(data, data.Length, endPoint);
           }
         }
         Thread.Sleep(5);
@@ -134,7 +194,7 @@ class Program
         startPos = endPos;
         frameCounter++;
       }
-      byte[] endPacket = System.Text.Encoding.ASCII.GetBytes("ENDE");
+      byte[] endPacket = [0x03];
       server.Send(endPacket, endPacket.Length, endPoint);
     }
   }
@@ -142,9 +202,8 @@ class Program
   static void RunClient()
   {
     using UdpClient client = new(25567, AddressFamily.InterNetwork);
-    byte[] endPacket = System.Text.Encoding.ASCII.GetBytes("ENDE");
-    
     WaveFormat format = new(44100, 24, 2);
+    AudioPacket packet = null;
     using WaveFileWriter writer = new($"data/received/received.wav", format);
     int last = 0;
     
@@ -154,10 +213,33 @@ class Program
       {
         IPEndPoint endPoint = new(IPAddress.Any, 0);
         byte[] received = client.Receive(ref endPoint);
-        if (received.SequenceEqual(endPacket)) break;
-        writer.Write(received, 0, received.Length);
-        last += received.Length;
-        Console.WriteLine("Received file.");
+        // check header + body of received packet
+        switch (received[0])
+        {
+          case 0x01: // start
+            Console.WriteLine("Received start packet.");
+            break;
+          case 0x02: // data
+            packet = DataPacket.Create(received);
+            break;
+          case 0x03: // end
+            Console.WriteLine("Received end packet.");
+            return;
+          default:
+            Console.WriteLine("Unknown packet type.{}", received[0]);
+            return;
+        }
+        
+        //if (received.SequenceEqual(endPacket)) break;
+        
+        if(packet is DataPacket dataPacket)
+        {
+          writer.Write(packet.Data, 0, packet.Data.Length);
+          last += packet.Data.Length;
+          
+          Console.WriteLine($"Recieved DataPacket Seq: {dataPacket.SequenceNumber}");
+        }
+        
       }
       catch (Exception ex)
       {
