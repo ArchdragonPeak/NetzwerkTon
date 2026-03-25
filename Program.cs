@@ -2,6 +2,71 @@
 using System.Net.Sockets;
 using NAudio.Wave;
 
+/* AudioPacket layout
+ * Start-Packet
+ * Sends information about audio stream needed to create wav/opus
+ * Bytes | Name
+ * ---Header--- 1 Byte
+ * 1     | Type
+ * ---Data---
+ * Dyn   | Data
+ 
+ * Data-Packet
+ * Bytes | Name
+ * ---Header--- 10 Byte
+ * 1     | Type
+ * 1     | Codec
+ * 4     | Sequence Number
+ * 4     | Body Length
+ * ---Data---
+ * Dyn   | Data
+ 
+ * END-Packet
+ * Bytes | Name
+ * ---Header--- 1 Byte
+ * 1     | Type
+ * ---Data---
+ * Dyn   | Data
+ */
+
+
+abstract class AudioPacket
+{
+  byte[] Header { get; }
+  byte[] Data { get; }
+
+  public AudioPacket(byte[] header, byte[] data)
+  {
+    this.Header = header;
+    this.Data = data;
+  }
+}
+
+class StartPacket : AudioPacket
+{
+  private StartPacket(byte[] data) : base(new byte[] { 0x01 }, data) { }
+  
+  public static StartPacket Create()
+  {
+    return new StartPacket(new byte[0]);
+  }
+}
+
+class DataPacket : AudioPacket
+{
+  public DataPacket(byte[] data) : base(new byte[] { 0x02 }, data) { }
+}
+
+class EndPacket : AudioPacket
+{
+  private EndPacket(byte[] data) : base(new byte[] { 0x03 }, data) { }
+  
+  public static EndPacket Create()
+  {
+    return new EndPacket([0]);
+  }
+}
+
 class Program
 {
 
